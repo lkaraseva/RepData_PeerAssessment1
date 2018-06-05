@@ -1,25 +1,179 @@
----
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
----
+# Activity Statistics
 
+## Getting the data
 
-## Loading and preprocessing the data
+**<span style="color:blue">1 - Code for reading in the dataset and processing the data</span>**
 
+Let's first download and read the data into a data frame
 
+```{r read}
+temp <- tempfile()
+download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip",temp)
+activity <- read.csv(unz(temp, "activity.csv"))
+unlink(temp)
+```
 
-## What is mean total number of steps taken per day?
+Some fields have undesired data format:
 
+```{r str}
+str(activity)
+```
 
+Let's convert *interval* variable into factor and create a variable *hour* based on intervals:
 
-## What is the average daily activity pattern?
+```{r reformat}
+library(plyr)
+activity$hour<-as.factor(round_any((as.numeric(activity$interval)+1)/100, 1, f = ceiling)) # create a variable for each hour
+activity$interval<-as.factor(activity$interval)
+```
 
+## Exploratory Data Analysis
 
+**<span style="color:blue">2 - Histogram of the total number of steps taken each day</span>**
+```{r stepseachday}
+library(ggplot2)
+ggplot(data = activity,
+       aes(as.Date(as.character(activity$date), "%Y-%m-%d"), steps)) +
+        stat_summary(fun.y = sum, # adds up all observations
+                     geom = "bar") +
+        xlab ("Dates") +
+        ggtitle("Total number of steps taken each day")
+```
 
-## Imputing missing values
+**<span style="color:blue">3 - Mean and median number of steps taken each day</span>**
 
+Let's create a data frame with means and medians for each day (keeping NAs for now)
+```{r means_medians}
+means<-ddply(activity, "date", summarise, mean = mean(steps))
+medians<-ddply(activity, "date", summarise, median = median(steps))
+means_medians<-merge(means,medians)
+```
 
+All medians are 0:
 
-## Are there differences in activity patterns between weekdays and weekends?
+```{r print2, echo=FALSE}
+print(means_medians)
+```
+
+That happens because there are no steps in more than 50% of intervals.
+
+**<span style="color:blue">4 - Time series plot of the average number of steps taken</span>**
+
+Let's visualize avarage number of steps taken (ignoring NAs for now):
+
+```{r timeseries}
+ggplot(means_medians, aes(y=mean, x=as.Date(as.character(means_medians$date), "%Y-%m-%d"))) + 
+        geom_bar(stat='identity') +
+        ylab ("Average daily steps") +
+        xlab ("Dates") +
+        ggtitle("Average number of steps taken")
+```        
+        
+**5 - The 5-minute interval that, on average, contains the maximum number of steps</span>**
+
+```{r meansbyintervals}
+meansbyintervals<-ddply(activity, "interval", summarise, mean = mean(steps,na.rm = TRUE)) 
+meansbyintervals<-arrange(meansbyintervals, desc(mean))
+meansbyintervals[1,]
+```
+
+The most walkable interval is 8:35am
+
+## Navigating Missing Values
+
+**<span style="color:blue">6 - Code to describe and show a strategy for imputing missing data</span>**
+
+Let's see at the missing values
+```{r}
+NAs <- is.na(activity$steps)
+sum(NAs, na.rm = T)
+mean(NAs, na.rm = T)
+```
+
+13% is a rather high number. Let's see if there any particular days or intervals where there are missing values:
+
+```{r}
+dates <- activity$date
+dates <- as.Date(as.character(dates), "%Y-%m-%d")
+hist(dates[NAs], "day", , xlab = "Date"
+                , main = "Histogram: what dates are missing")
+```
+
+Sounds like that missing values are spread  between 8 out of 61 days. Not too bad. Let's remove these observations:
+
+```{r}
+completeactivity <- activity[complete.cases(activity), ]
+```
+
+**<span style="color:blue">7 - Histogram of the total number of steps taken each day after missing values are imputed</span>**
+
+The plot obviously doesn't change much:
+
+```{r}
+ggplot(data = completeactivity,
+       aes(as.Date(as.character(completeactivity$date), "%Y-%m-%d"), steps)) +
+        stat_summary(fun.y = sum,
+                     geom = "bar") +
+        xlab ("Dates") +
+        ggtitle("total number of steps taken each day after missing values are imputed")
+```
+                     
+**<span style="color:blue">8 - Panel plot comparing the average number of steps taken per 5-minute interval across weekdays and weekends</span>**
+
+Let's first do some formatting and define weekdays and weekends
+
+```{r}
+library(timeDate)
+completeactivity$date<-as.Date(as.character(completeactivity$date), "%Y-%m-%d")
+completeactivity$weekday<-isWeekday(completeactivity$date)
+completeactivity$weekday[completeactivity$weekday==TRUE] <- "Weekday"
+completeactivity$weekday[completeactivity$weekday==FALSE] <- "Weekend"
+completeactivity$weekday<-as.factor(completeactivity$weekday)
+```
+
+Create a new data frame with means by weekdays and weekends and by hourly intervals:
+
+```{r}
+completeactivitymeans<-aggregate(completeactivity$steps
+                                 , by=list(completeactivity$hour,completeactivity$weekday)
+                                 , FUN=mean)
+names(completeactivitymeans)<-c("hour","day","steps")
+```
+
+Finally, build a plot of means:
+
+```{r}
+ggplot(data = completeactivitymeans,
+       aes(hour, steps)) + 
+        geom_point(aes(color=hour)) +
+        facet_grid(day~.) +
+        ggtitle("Means by hourly intervals")
+```
+
+And other statistics:
+
+```{r}
+ggplot(data = completeactivity,
+       aes(hour, steps)) + 
+        geom_boxplot(aes(color=hour)) +
+        facet_grid(weekday~.) +
+        ggtitle("Statistics by hourly intervals")
+```
+
+## Summary
+
+**Weekday and Weekend patters are different**
+
+- Wakes up later on weekends
+
+- Average amount of steps per interval is higher during weekends
+
+- Walking on weekends is more popular
+
+**Other data caviats and findings**
+
+- 8 days are missing oobeservations (forgot to track?)
+
+- The excercise showed that exploring daily aggregated or hourly aggregated data would make more sense - interval data is skewed because there are a lot of 0 steps as well as intervals with very high numbers of steps
+
+**Thank you for the review!**
